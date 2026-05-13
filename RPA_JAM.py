@@ -5,115 +5,183 @@ import pandas as pd
 import win32com.client as win32
 import tkinter as tk
 from tkinter import filedialog
+from tkinter import ttk
 import warnings
 import time 
 
-# Modulo de automatizacion para gestionar proyectos RPA.
-# Contiene funciones para clonar una plantilla, reemplazar textos en Word,
-# insertar imagenes, generar cuadros EBSS y convertir documentos a PDF.
+# ==========================================
+# CLASE CONSOLA DE PROGRESO (GUI)
+# ==========================================
+# ==========================================
+# CLASE CONSOLA DE PROGRESO (GUI)
+# ==========================================
+class VentanaConsola:
+    # CONSTRUCTOR: Inicializa la ventana de consola con barra de progreso y area de logs
+    def __init__(self, titulo="Ejecucion RPA en curso"):
+        self.root = tk.Tk()  # Crear ventana principal Tk
+        self.root.title(titulo)  # Establecer titulo de ventana
+        self.root.geometry("750x500")  # Tamaño inicial (ancho x alto)
+        self.root.configure(bg="#f4f4f4")  # Color fondo gris claro
+        
+        # CENTRAR LA VENTANA EN LA PANTALLA
+        window_width, window_height = 750, 500  # Dimensiones
+        screen_width = self.root.winfo_screenwidth()  # Ancho pantalla total
+        screen_height = self.root.winfo_screenheight()  # Alto pantalla total
+        position_top = int(screen_height/2 - window_height/2)  # Centro vertical
+        position_right = int(screen_width/2 - window_width/2)  # Centro horizontal
+        self.root.geometry(f'{window_width}x{window_height}+{position_right}+{position_top}')
+        
+        # ETIQUETA DE ESTADO: Muestra mensaje del proceso actual
+        self.lbl_estado = tk.Label(self.root, text="Iniciando proceso...", font=("Segoe UI", 10, "bold"), bg="#f4f4f4", fg="#333333")
+        self.lbl_estado.pack(pady=(15, 5))  # Margen 15 arriba, 5 abajo
+        
+        # BARRA DE PROGRESO: Indicador visual del avance 0-100%
+        self.progress = ttk.Progressbar(self.root, orient="horizontal", length=700, mode="determinate")
+        self.progress.pack(pady=5)  # Margen de 5 pixeles
+        
+        # FRAME PARA AREA DE TEXTO Y SCROLL
+        frame_text = tk.Frame(self.root)  # Marco contenedor
+        frame_text.pack(pady=10, padx=20, fill="both", expand=True)  # Ocupa espacio disponible
+        
+        # BARRA DE DESPLAZAMIENTO VERTICAL
+        self.scrollbar = tk.Scrollbar(frame_text)  # Barra vertical
+        self.scrollbar.pack(side="right", fill="y")  # Colocar a derecha
+        
+        # VENTANA DE LOGS: Area de texto para mostrar proceso en tiempo real
+        # Fondo oscuro #1e1e1e, texto verde #00ff00 para efecto terminal
+        self.text_log = tk.Text(frame_text, height=20, width=80, font=("Consolas", 9), yscrollcommand=self.scrollbar.set, bg="#1e1e1e", fg="#00ff00")
+        self.text_log.pack(side="left", fill="both", expand=True)  # Ocupa el espacio principal
+        self.scrollbar.config(command=self.text_log.yview)  # Vincular barra a ventana de texto
+        
+        self.root.update()  # Actualizar pantalla
+
+    # METODO LOG: Agregar mensaje al registro de logs
+    def log(self, mensaje):  # mensaje = texto a registrar
+        self.text_log.insert(tk.END, mensaje + "\n")  # Insertar al final con salto de linea
+        self.text_log.see(tk.END)  # Hacer scroll automatico al final
+        self.root.update()  # Refrescar pantalla
+
+    # METODO PROGRESO: Actualizar barra de progreso y etiqueta de estado
+    def set_progreso(self, actual, total, mensaje_estado=""):  # actual = items procesados, total = items totales
+        if total > 0:  # Validar que no sea division por cero
+            porcentaje = (actual / total) * 100  # Calcular porcentaje
+            self.progress["value"] = porcentaje  # Actualizar barra visual
+        if mensaje_estado:  # Si se proporciono mensaje
+            self.lbl_estado.config(text=mensaje_estado)  # Actualizar etiqueta de estado
+        self.root.update()  # Refrescar pantalla
+        
+    # METODO CERRAR: Destruir la ventana
+    def cerrar(self):  # Cerrar ventana de consola
+        self.root.destroy()  # Destruir widget
 
 # ==========================================
-# FUNCIONES DE BUSQUEDA DINAMICA
+# FUNCIONES AUXILIARES DE BUSQUEDA
 # ==========================================
-def buscar_archivos(carpeta_base, nombres_buscar):
-    # Explora recursivamente la carpeta base y devuelve las rutas de los archivos
-    # cuyo nombre coincide con alguno de los nombres objetivo.
-    encontrados = []
-    for raiz, _, archivos in os.walk(carpeta_base):
-        for archivo in archivos:
-            if archivo in nombres_buscar:
-                encontrados.append(os.path.normpath(os.path.join(raiz, archivo)))
-    return encontrados
 
-def encontrar_excel_ebss(carpeta_base, codigo, empresa):
-    # Busca el archivo de tablas EBSS dentro de la carpeta base y, si no lo
-    # encuentra, realiza una busqueda ascendiente hasta la carpeta del proyecto.
-    nombre_excel = f"{codigo} TABLAS EBSS {empresa}.xlsx"
-    for raiz, _, archivos in os.walk(carpeta_base):
-        if nombre_excel in archivos:
-            return os.path.normpath(os.path.join(raiz, nombre_excel))
+# FUNCION: Buscar archivos por nombre en carpeta y subcarpetas
+def buscar_archivos(carpeta_base, nombres_buscar):  # carpeta_base = donde empezar, nombres_buscar = lista de nombres
+    encontrados = []  # Lista para almacenar resultados
+    for raiz, _, archivos in os.walk(carpeta_base):  # Recorrer arbol de directorios
+        for archivo in archivos:  # Para cada archivo
+            if archivo in nombres_buscar:  # Si nombre esta en lista de busqueda
+                encontrados.append(os.path.normpath(os.path.join(raiz, archivo)))  # Agregar ruta completa
+    return encontrados  # Retornar lista de rutas encontradas
+
+# FUNCION: Encontrar archivo Excel especifico de tablas EBSS
+def encontrar_excel_ebss(carpeta_base, codigo, empresa):  # Busca el Excel de datos EBSS
+    nombre_excel = f"{codigo} TABLAS EBSS {empresa}.xlsx"  # Nombre esperado del archivo
+    # ESTRATEGIA 1: Busqueda hacia abajo desde carpeta_base
+    for raiz, _, archivos in os.walk(carpeta_base):  # Recorrer desde carpeta_base
+        if nombre_excel in archivos:  # Si encontramos el archivo
+            return os.path.normpath(os.path.join(raiz, nombre_excel))  # Retornar ruta completa
     
-    ruta = carpeta_base
-    nombre_proyecto = f"{codigo} {empresa}"
-    # Busca hacia arriba en la jerarquia de carpetas hasta encontrar la raiz del proyecto.
+    # ESTRATEGIA 2: Subir hacia arriba hasta encontrar carpeta proyecto
+    ruta = carpeta_base  # Punto de inicio
+    nombre_proyecto = f"{codigo} {empresa}"  # Nombre esperado de carpeta padre
+    # Subir en jerarquia hasta encontrar carpeta del proyecto o llegar a raiz
     while os.path.basename(ruta) != nombre_proyecto and os.path.dirname(ruta) != ruta:
-        ruta = os.path.dirname(ruta)
+        ruta = os.path.dirname(ruta)  # Ir un nivel arriba
     
-    for raiz, _, archivos in os.walk(ruta):
-        if nombre_excel in archivos:
-            return os.path.normpath(os.path.join(raiz, nombre_excel))
+    # ESTRATEGIA 3: Buscar desde carpeta padre encontrada
+    for raiz, _, archivos in os.walk(ruta):  # Recorrer desde carpeta padre
+        if nombre_excel in archivos:  # Si encontramos
+            return os.path.normpath(os.path.join(raiz, nombre_excel))  # Retornar ruta
             
-    return None
+    return None  # No encontrado
 
 # ==========================================
 # FASE 1: CLONAR Y RENOMBRAR
 # ==========================================
-def fase1_crear_entorno(ruta_plantilla):
+def fase1_crear_entorno(ruta_plantilla, consola):
     if not ruta_plantilla or not os.path.exists(ruta_plantilla):
-        pyautogui.alert("Error: La ruta de la plantilla no es valida o no existe. Carguela en el menu principal.", "Error de Configuracion")
+        consola.log("[ERROR] Ruta de plantilla no valida.")
         return False
 
-    # Solicita los datos de proyecto y empresa al usuario.
     codigo_proyecto = pyautogui.prompt("Introduce el CODIGO del proyecto:", "Datos del Proyecto")
     if not codigo_proyecto: return None 
         
     nombre_empresa = pyautogui.prompt("Introduce el NOMBRE DE LA EMPRESA:", "Datos del Proyecto")
     if not nombre_empresa: return None
 
-    # Define la ruta de la plantilla y la carpeta destino de la copia.
     directorio_padre = os.path.normpath(os.path.dirname(ruta_plantilla))
     nombre_nueva_carpeta = f"{codigo_proyecto} {nombre_empresa}"
     carpeta_destino = os.path.join(directorio_padre, nombre_nueva_carpeta)
 
-    print("\n" + "="*50)
-    print(f"INICIANDO FASE 1: CLONADO DEL PROYECTO")
-    print("="*50)
-    print(f"Creando carpeta: {nombre_nueva_carpeta}...")
+    consola.set_progreso(10, 100, f"Creando carpeta: {nombre_nueva_carpeta}...")
+    consola.log(f"==========================================")
+    consola.log(f"FASE 1: CLONACION Y RENOMBRADO")
+    consola.log(f"==========================================")
+    consola.log(f"Ruta origen: {ruta_plantilla}")
+    consola.log(f"Ruta destino: {carpeta_destino}\n")
 
     try:
-        # Copia la plantilla completa en la nueva ubicacion.
         shutil.copytree(ruta_plantilla, carpeta_destino)
+        consola.set_progreso(50, 100, "Carpeta base clonada. Renombrando directorios y archivos...")
 
-        # Recorre la estructura copiada de abajo hacia arriba para renombrar los
-        # archivos y carpetas que contienen los marcadores de plantilla.
+        total_archivos = sum([len(files) for r, d, files in os.walk(carpeta_destino)])
+        procesados = 0
+
         for raiz, carpetas, archivos in os.walk(carpeta_destino, topdown=False):
             for nombre_archivo in archivos:
+                procesados += 1
                 if "XXXX" in nombre_archivo or "[[EMPRESA]]" in nombre_archivo:
                     nuevo_nombre = nombre_archivo.replace("XXXX", codigo_proyecto).replace("[[EMPRESA]]", nombre_empresa)
                     os.rename(os.path.join(raiz, nombre_archivo), os.path.join(raiz, nuevo_nombre))
+                    consola.log(f"   [RENOMBRADO] Archivo: {nuevo_nombre}")
+                if procesados % 5 == 0:
+                    consola.set_progreso(50 + (procesados/total_archivos)*40, 100)
             
             for nombre_carpeta in carpetas:
                 if "XXXX" in nombre_carpeta or "[[EMPRESA]]" in nombre_carpeta:
                     nuevo_nombre = nombre_carpeta.replace("XXXX", codigo_proyecto).replace("[[EMPRESA]]", nombre_empresa)
                     os.rename(os.path.join(raiz, nombre_carpeta), os.path.join(raiz, nuevo_nombre))
+                    consola.log(f"   [RENOMBRADO] Carpeta: {nuevo_nombre}")
 
-        print("Fase 1 completada con exito.")
-        pyautogui.alert("La estructura de carpetas se ha creado con exito.", "Completado")
+        consola.set_progreso(100, 100, "Fase 1 completada con exito.")
+        consola.log("\n[OK] Clonacion y configuracion del entorno finalizada.")
         return True 
 
     except FileExistsError:
-        pyautogui.alert("Error: ya existe una carpeta con ese codigo y nombre de empresa.", "Error")
+        consola.log("\n[ERROR] Ya existe una carpeta con ese codigo y nombre de empresa.")
         return False
     except Exception as e:
-        pyautogui.alert(f"Ha ocurrido un error inesperado:\n{str(e)}", "Error Critico")
+        consola.log(f"\n[ERROR CRITICO] {str(e)}")
         return False
 
 # ==========================================
 # FASE 2: REEMPLAZAR TEXTOS
 # ==========================================
-def fase2_reemplazar_textos(carpeta_proyecto, ruta_excel, codigo, empresa):
-    # Verifica que el archivo Excel de configuracion exista antes de proceder.
+def fase2_reemplazar_textos(carpeta_proyecto, ruta_excel, codigo, empresa, consola):
     if not ruta_excel or not os.path.exists(ruta_excel):
-        print("ERROR: Archivo Excel de configuracion no encontrado. Carguelo en el menu.")
+        consola.log("[ERROR] Archivo Excel de configuracion no encontrado.")
         return
 
-    # Muestra un mensaje de inicio de la fase para informar al usuario.
-    print("\n" + "="*50)
-    print(f"INICIANDO FASE 2: REEMPLAZO DE ETIQUETAS DE TEXTO")
-    print("="*50)
+    consola.log(f"==========================================")
+    consola.log(f"FASE 2: SUSTITUCION PARAMETRICA DE TEXTOS")
+    consola.log(f"==========================================")
+    consola.log(f"Carpeta objetivo: {carpeta_proyecto}")
+    consola.set_progreso(5, 100, "Iniciando motor COM de Word...")
 
-    # Define un diccionario que mapea las pestanas del Excel con los nombres de archivos Word a procesar.
-    # Cada clave es una pestana del Excel, y el valor es una lista de nombres de archivos.
     archivos_objetivo = {
         'PORTADA': [f"01 {codigo} PORTADA {empresa}.docx"],
         'MEMORIA ETIQUETAS': [f"03 {codigo} MEMORIA OBRAS {empresa}.docx", f"03 {codigo} MEMORIA ACT {empresa}.docx"],
@@ -123,135 +191,134 @@ def fase2_reemplazar_textos(carpeta_proyecto, ruta_excel, codigo, empresa):
     }
 
     try:
-        # Inicializa la aplicacion Word en segundo plano para evitar mostrar la interfaz al usuario.
         word = win32.gencache.EnsureDispatch('Word.Application')
         word.Visible = False 
-        word.DisplayAlerts = False  # Desactiva alertas para evitar interrupciones.
+        word.DisplayAlerts = False 
 
-        # Itera sobre cada pestana del Excel y sus archivos correspondientes.
+        total_archivos = sum(len(lista) for lista in archivos_objetivo.values())
+        archivos_procesados = 0
+
         for pestana_excel, lista_nombres in archivos_objetivo.items():
             try:
-                # Intenta cargar la hoja de Excel especificada por la pestana.
                 df_textos = pd.read_excel(ruta_excel, sheet_name=pestana_excel)
+                consola.log(f"\n[INFO] Leyendo pestana Excel: [{pestana_excel}] con {len(df_textos)} etiquetas declaradas.")
             except Exception:
-                # Si la pestana no existe, salta a la siguiente.
                 continue 
 
-            # Busca los archivos Word en la carpeta del proyecto que coincidan con los nombres definidos.
             rutas_encontradas = buscar_archivos(carpeta_proyecto, lista_nombres)
+            
+            if not rutas_encontradas:
+                consola.log(f"[INFO] Documentos para [{pestana_excel}] no encontrados en esta ruta.")
 
-            # Procesa cada documento Word encontrado.
             for ruta_absoluta in rutas_encontradas:
-                print(f"   Modificando textos: {os.path.basename(ruta_absoluta)}")
-                # Abre el documento Word para editarlo.
+                nombre_doc = os.path.basename(ruta_absoluta)
+                consola.log(f"\n   [ABRIENDO DOCUMENTO] {nombre_doc}")
                 doc = word.Documents.Open(ruta_absoluta)
+                
+                total_etiquetas = len(df_textos)
+                etiquetas_procesadas = 0
 
-                # Itera sobre cada fila del DataFrame de la pestana Excel.
                 for index, row in df_textos.iterrows():
-                    # Extrae la etiqueta (columna 0) y el valor (columna 1) de la fila.
                     etiqueta = str(row.iloc[0]).strip()
                     valor = str(row.iloc[1]).strip()
-                    # Omite filas donde el valor sea nulo o vacio.
+                    etiquetas_procesadas += 1
+                    
                     if valor.lower() == 'nan' or valor == '':
                         continue
 
-                    # Reemplaza la etiqueta en todas las historias del documento (cuerpo, encabezados, pies, etc.).
+                    consola.log(f"      > Buscando: {etiqueta} | Nuevo valor: {valor[:25]}...")
+                    
+                    progreso_actual = (archivos_procesados / total_archivos * 100) + ((etiquetas_procesadas / total_etiquetas) * (100 / total_archivos))
+                    consola.set_progreso(progreso_actual, 100, f"Editando: {nombre_doc} ({etiquetas_procesadas}/{total_etiquetas})")
+
                     for story in doc.StoryRanges:
-                        story.Find.Execute(FindText=etiqueta, ReplaceWith=valor, Replace=2)  # Replace=2 significa reemplazar todas las ocurrencias.
+                        story.Find.Execute(FindText=etiqueta, ReplaceWith=valor, Replace=2)
                         while story.NextStoryRange:
                             story = story.NextStoryRange
                             story.Find.Execute(FindText=etiqueta, ReplaceWith=valor, Replace=2)
 
-                # Guarda y cierra el documento despues de procesarlo.
                 doc.Save(); doc.Close()
-                print(f"   COMPLETADO: {os.path.basename(ruta_absoluta)}")
+                consola.log(f"   [GUARDADO OK] Cambios aplicados en: {nombre_doc}")
+                archivos_procesados += 1
 
-        # Cierra la aplicacion Word al finalizar.
         word.Quit()
+        consola.set_progreso(100, 100, "Sustitucion de textos completada.")
     except Exception as e:
-        print(f"Ocurrio un error en la Fase 2:\n{str(e)}")
-        try: word.Quit()  # Asegura que Word se cierre incluso si hay error.
+        consola.log(f"\n[ERROR CRITICO] Fase 2: {str(e)}")
+        try: word.Quit() 
         except: pass
 
 # ==========================================
 # FASE 3: INSERCION DE IMAGENES
 # ==========================================
-def fase3_insertar_imagenes(carpeta_proyecto, ruta_excel, codigo, empresa):
-    # Verifica que el archivo Excel de configuracion exista.
+def fase3_insertar_imagenes(carpeta_proyecto, ruta_excel, codigo, empresa, consola):
     if not ruta_excel or not os.path.exists(ruta_excel):
-        print("ERROR: Archivo Excel de configuracion no encontrado. Carguelo en el menu.")
+        consola.log("[ERROR] Archivo Excel de configuracion no encontrado.")
         return
 
-    # Muestra mensaje de inicio de la fase.
-    print("\n" + "="*50)
-    print(f"INICIANDO FASE 3: INSERCION DE IMAGENES")
-    print("="*50)
-
-    # Define el nombre del documento de memoria de actividad a procesar.
+    consola.log(f"\n==========================================")
+    consola.log(f"FASE 3: INSERCION DE IMAGENES TECNICAS")
+    consola.log(f"==========================================")
+    
     nombre_memoria = f"03 {codigo} MEMORIA ACT {empresa}.docx"
-    # Busca el archivo en la carpeta del proyecto.
     rutas_encontradas = buscar_archivos(carpeta_proyecto, [nombre_memoria])
 
-    # Si no se encuentra el documento, informa y sale.
     if not rutas_encontradas:
-        print("   No se encontro la memoria de actividad en la carpeta seleccionada.")
+        consola.log(f"[AVISO] No se encontro el documento objetivo: {nombre_memoria} en la ruta actual.")
         return
 
     try:
-        # Suprime advertencias al leer el Excel para evitar mensajes innecesarios.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            # Carga la hoja 'MEMORIA TABLAS' que contiene las etiquetas y rutas de imagenes.
             df_tablas = pd.read_excel(ruta_excel, sheet_name='MEMORIA TABLAS')
+            consola.log(f"[INFO] Leyendo base de datos de imagenes. Total declaradas: {len(df_tablas)}")
     except Exception:
-        # Si no puede cargar la hoja, sale silenciosamente.
+        consola.log("[ERROR] Pestana [MEMORIA TABLAS] no encontrada en el Excel.")
         return
 
     try:
-        # Inicializa Word en segundo plano.
         word = win32.gencache.EnsureDispatch('Word.Application')
         word.Visible = False
         word.DisplayAlerts = False 
+        
+        total_imagenes = len(df_tablas)
+        imagenes_procesadas = 0
 
-        # Procesa cada documento de memoria encontrado (generalmente uno).
         for ruta_absoluta in rutas_encontradas:
-            print(f"   Procesando Word: {os.path.basename(ruta_absoluta)}")
-            # Abre el documento Word.
+            consola.log(f"\n   [ABRIENDO DOCUMENTO] {os.path.basename(ruta_absoluta)}")
             doc = word.Documents.Open(ruta_absoluta)
-            # Calcula el ancho util de la pagina (ancho total menos margenes).
             ancho_util = doc.PageSetup.PageWidth - doc.PageSetup.LeftMargin - doc.PageSetup.RightMargin
 
-            # Itera sobre cada fila de la tabla de imagenes.
             for index, row in df_tablas.iterrows():
-                # Extrae la etiqueta y la ruta de la imagen de la fila.
                 etiqueta = str(row['Etiqueta']).strip()
                 ruta_imagen = os.path.normpath(str(row['Direccion']).strip())
+                imagenes_procesadas += 1
 
-                # Verifica que la ruta sea una imagen valida y que el archivo exista.
-                if ruta_imagen.lower().endswith(('.png', '.jpg', '.jpeg')) and os.path.exists(ruta_imagen):
-                    # Limpia el formato de busqueda para evitar interferencias.
-                    word.Selection.Find.ClearFormatting()
-                    # Busca la etiqueta en el documento.
-                    if word.Selection.Find.Execute(FindText=etiqueta):
-                        # Elimina la etiqueta encontrada.
-                        word.Selection.Delete()
-                        # Inserta la imagen en la posicion de la etiqueta.
-                        imagen = word.Selection.InlineShapes.AddPicture(FileName=ruta_imagen)
-                        # Bloquea la relacion de aspecto para mantener proporciones.
-                        imagen.LockAspectRatio = -1 
-                        # Ajusta el ancho de la imagen al ancho util de la pagina.
-                        imagen.Width = ancho_util
-                        # Centra la imagen horizontalmente.
-                        imagen.Range.ParagraphFormat.Alignment = 1
-                        print(f"      Imagen insertada: {etiqueta}")
+                consola.set_progreso(imagenes_procesadas, total_imagenes, f"Buscando marcador de imagen: {etiqueta}")
 
-            # Guarda y cierra el documento.
+                if ruta_imagen.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    if os.path.exists(ruta_imagen):
+                        consola.log(f"      > Insertando: {etiqueta} desde {ruta_imagen}")
+                        word.Selection.Find.ClearFormatting()
+                        if word.Selection.Find.Execute(FindText=etiqueta):
+                            word.Selection.Delete()
+                            imagen = word.Selection.InlineShapes.AddPicture(FileName=ruta_imagen)
+                            imagen.LockAspectRatio = -1 
+                            imagen.Width = ancho_util
+                            imagen.Range.ParagraphFormat.Alignment = 1
+                            consola.log(f"        [OK] Imagen acoplada correctamente.")
+                        else:
+                            consola.log(f"        [AVISO] Etiqueta {etiqueta} no encontrada en el texto.")
+                    else:
+                        consola.log(f"      > [ERROR] Archivo de imagen no encontrado en la ruta: {ruta_imagen}")
+
             doc.Save(); doc.Close()
+            consola.log(f"   [GUARDADO OK] Memoria actualizada.")
             
-        # Cierra Word.
         word.Quit()
-    except Exception:
-        # En caso de error, intenta cerrar Word.
+        consola.set_progreso(100, 100, "Insercion de imagenes finalizada.")
+    except Exception as e:
+        consola.log(f"\n[ERROR CRITICO] Fase 3: {e}")
         try: word.Quit()
         except: pass
 
@@ -259,63 +326,46 @@ def fase3_insertar_imagenes(carpeta_proyecto, ruta_excel, codigo, empresa):
 # FASE 4: CUADROS EBSS 
 # ==========================================
 def exportar_rango_a_imagen(ws, rango_str, ruta_temp):
-    # Funcion auxiliar para exportar un rango de celdas de Excel como imagen PNG.
     try:
-        # Selecciona el rango especificado en la hoja de trabajo.
         rango = ws.Range(rango_str)
-        # Verifica que el rango tenga dimensiones validas (ancho y alto mayores a cero).
-        if rango.Width == 0 or rango.Height == 0:
-            return False
-
-        # Copia el rango como imagen (Appearance=1 para pantalla, Format=2 para bitmap).
+        if rango.Width == 0 or rango.Height == 0: return False
         rango.CopyPicture(Appearance=1, Format=2)
-        time.sleep(1)  # Espera para que la copia se complete.
-
-        # Crea un objeto de grafico temporal en la hoja para pegar la imagen.
+        time.sleep(1) 
         chart_obj = ws.ChartObjects().Add(50, 50, rango.Width, rango.Height)
-        chart_obj.Activate()
-        # Intenta hacer invisible el borde del grafico (puede fallar en algunas versiones).
+        chart_obj.Activate() 
         try: chart_obj.Chart.ChartArea.Format.Line.Visible = 0
         except: pass
-        # Pega la imagen copiada en el grafico.
         chart_obj.Chart.Paste()
-        time.sleep(0.5)  # Espera para que el pegado se complete.
-        # Exporta el grafico como imagen PNG.
+        time.sleep(0.5) 
         chart_obj.Chart.Export(ruta_temp)
-        # Elimina el objeto grafico temporal.
         chart_obj.Delete()
         return True
     except Exception:
-        # En caso de error, intenta eliminar el grafico si existe.
-        try: chart_obj.Delete()
+        try: chart_obj.Delete() 
         except: pass
         return False
 
-def fase4_insertar_ebss(carpeta_proyecto, ruta_excel, codigo, empresa):
-    # Verifica que el Excel de configuracion exista.
+def fase4_insertar_ebss(carpeta_proyecto, ruta_excel, codigo, empresa, consola):
     if not ruta_excel or not os.path.exists(ruta_excel):
-        print("ERROR: Archivo Excel de configuracion no encontrado. Carguelo en el menu.")
+        consola.log("[ERROR] Archivo Excel de configuracion no encontrado.")
         return
 
-    # Muestra mensaje de inicio.
-    print("\n" + "="*50)
-    print(f"INICIANDO FASE 4: GENERACION DE CUADROS EBSS")
-    print("="*50)
+    consola.log(f"\n==========================================")
+    consola.log(f"FASE 4: EXTRACCION Y MAQUETACION DE EBSS")
+    consola.log(f"==========================================")
+    consola.set_progreso(5, 100, "Analizando oficios habilitados en el Excel...")
 
-    # Define los rangos de celdas para los cuadros 1 y 2 en Excel.
     RANGO_CUADRO_1 = "A1:I37"
     RANGO_CUADRO_2 = "K39:P73"
 
     try:
-        # Suprime advertencias y carga la hoja 'PERSONAL_EBSS' que lista los oficios.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             df_oficios = pd.read_excel(ruta_excel, sheet_name='PERSONAL_EBSS')
     except Exception:
-        print("Pestana [PERSONAL_EBSS] no encontrada.")
+        consola.log("[ERROR] Pestana [PERSONAL_EBSS] no encontrada.")
         return
 
-    # Filtra los oficios marcados con 'SI' en la columna 1.
     oficios_seleccionados = []
     for index, row in df_oficios.iterrows():
         oficio = str(row.iloc[0]).strip()
@@ -323,331 +373,576 @@ def fase4_insertar_ebss(carpeta_proyecto, ruta_excel, codigo, empresa):
         if marcado == 'SI':
             oficios_seleccionados.append(oficio)
 
-    # Si no hay oficios seleccionados, informa y sale.
+    # Si no hay oficios seleccionados, no hay nada que procesar
     if not oficios_seleccionados:
-        print("   No hay oficios marcados con 'SI'.")
+        # Registrar aviso de cancelacion
+        consola.log("[AVISO] La tabla indica que no hay oficios marcados con 'SI'. Operacion cancelada.")
+        # Salir de la funcion sin continuar
         return
 
-    # Define los nombres de los documentos EBSS destino.
+    # INFORMAR al usuario cuantos oficios se van a procesar
+    # y mostrar los primeros 3 como muestra (si hay mas de 3, truncar)
+    consola.log(f"[INFO] Detectados {len(oficios_seleccionados)} oficios a procesar: {', '.join(oficios_seleccionados[:3])}...")
+
+    # PASO 2: Encontrar documentos Word destino donde insertar los cuadros EBSS
+    # Buscar dos archivos especificos: uno de nivel 05 y otro de nivel 07
     nombres_destino = [f"05 {codigo} EBSS {empresa}.doc", f"07 {codigo} EBSS {empresa}.doc"]
-    # Busca estos documentos en la carpeta del proyecto.
+    # Busqueda recursiva en la carpeta del proyecto
     docs_ebss_destino = buscar_archivos(carpeta_proyecto, nombres_destino)
 
-    # Si no se encuentran, informa y sale.
+    # Validar que encontramos documentos destino
     if not docs_ebss_destino:
-        print("   No se encontraron documentos EBSS en la carpeta seleccionada.")
+        # Error: no hay documentos donde insertar los datos
+        consola.log("[AVISO] No se encontraron documentos EBSS en la ruta objetivo para incrustar las tablas.")
+        # Cancelar fase
         return
 
-    # Busca el Excel de tablas EBSS en la estructura del proyecto.
+    # PASO 3: Encontrar el Excel fuente con las tablas EBSS
+    # Este archivo contiene las hojas con los datos de cada oficio
     ruta_origen_ebss = encontrar_excel_ebss(carpeta_proyecto, codigo, empresa)
+    # Validar que existe el archivo
     if not ruta_origen_ebss:
-        print("Error: no se encontro el Excel de Tablas EBSS.")
+        # Error critico: no hay datos que copiar
+        consola.log("[ERROR] No se encontro el archivo de calculo Excel de Tablas EBSS.")
+        # Cancelar fase
         return
 
-    # Define la ruta temporal para la imagen del cuadro.
+    # PASO 4: Crear ruta para archivo temporal de imagen
+    # Las imagenes se generan temporalmente, se usan, y se eliminan
     ruta_temp = os.path.normpath(os.path.join(carpeta_proyecto, "temp_cuadro.png"))
 
-    try:
-        # Inicializa Excel y Word en segundo plano.
+    try:  # BLOQUE TRY: Capturar errores durante la automatizacion
+        # PASO 5A: INICIAR APLICACION EXCEL
+        # Usar COM (Component Object Model) para acceder a Excel
         excel_app = win32.gencache.EnsureDispatch('Excel.Application')
-        excel_app.Visible = False
-        excel_app.DisplayAlerts = False
+        excel_app.Visible = False  # No mostrar ventana de Excel
+        excel_app.DisplayAlerts = False  # No mostrar dialogos emergentes
         
+        # PASO 5B: INICIAR APLICACION WORD
         word = win32.gencache.EnsureDispatch('Word.Application')
-        word.Visible = False
-        word.DisplayAlerts = False
+        word.Visible = False  # No mostrar ventana de Word
+        word.DisplayAlerts = False  # No mostrar dialogos
         
-        print(f"   Abriendo Excel: {os.path.basename(ruta_origen_ebss)}")
-        # Abre el libro de Excel con las tablas EBSS.
+        # PASO 5C: ABRIR ARCHIVO EXCEL CON DATOS EBSS
+        # Este archivo contiene las hojas para cada oficio
+        consola.log(f"\n   [ABRIENDO EXCEL DE CALCULO] {os.path.basename(ruta_origen_ebss)}")
+        # Abrir como workbook (libro de trabajo)
         wb_tablas = excel_app.Workbooks.Open(ruta_origen_ebss)
 
-        # Procesa cada documento EBSS destino.
-        for ruta_doc in docs_ebss_destino:
-            print(f"   Procesando Word: {os.path.basename(ruta_doc)}")
-            # Abre el documento Word.
+        # PASO 6: RECORRER CADA DOCUMENTO WORD DESTINO
+        # Procesaremos cada archivo Word secuencialmente
+        for doc_idx, ruta_doc in enumerate(docs_ebss_destino):
+            # Informar cual documento se esta procesando
+            consola.log(f"\n   [ABRIENDO DOCUMENTO WORD] {os.path.basename(ruta_doc)}")
+            # Abrir documento Word
             doc = word.Documents.Open(ruta_doc)
             
-            # Busca la etiqueta [[TABLAS_OFICIOS]] para reemplazarla con los cuadros.
+            # Limpiar criterios de busqueda previos
             word.Selection.Find.ClearFormatting()
+            # BUSCAR etiqueta matriz donde insertar los cuadros
             if word.Selection.Find.Execute(FindText="[[TABLAS_OFICIOS]]"):
-                # Elimina la etiqueta.
+                # ENCONTRADA la etiqueta
+                consola.log("      [+] Etiqueta matriz [[TABLAS_OFICIOS]] localizada. Preparando insercion...")
+                # Eliminar la etiqueta (sera reemplazada por los cuadros)
                 word.Selection.Delete()
 
-                # Bandera para saber si es el primer oficio (no insertar salto de pagina).
+                # Bandera para no insertar salto de pagina antes del primer oficio
                 primer_paso = True
-                # Para cada oficio seleccionado.
-                for oficio in oficios_seleccionados:
+                # Total de oficios para barra de progreso
+                total_oficios = len(oficios_seleccionados)
+                
+                # PASO 7: PROCESAR CADA OFICIO SELECCIONADO
+                for idx, oficio in enumerate(oficios_seleccionados):
+                    # Actualizar barra de progreso
+                    consola.set_progreso(idx + 1, total_oficios, f"Procesando oficios EBSS: {oficio}...")
+                    # Informar que se esta extrayendo este oficio
+                    consola.log(f"      > Extrayendo datos de oficio: {oficio}")
                     try:
-                        # Activa la hoja correspondiente al oficio en Excel.
+                        # OBTENER hoja Excel correspondiente a este oficio
+                        # El nombre de la hoja debe coincidir exactamente con el nombre del oficio
                         ws = wb_tablas.Sheets(oficio)
+                        # Activar la hoja (ponerla como activa en Excel)
                         ws.Activate()
-
-                        # Si no es el primer oficio, inserta un salto de pagina.
-                        if not primer_paso:
-                            word.Selection.InsertBreak(Type=7)  # Type=7 es salto de pagina.
-
-                        # Exporta el rango del cuadro 1 como imagen y la inserta si tiene exito.
+                        
+                        # Si NO es el primer oficio, insertar salto de pagina
+                        if not primer_paso: 
+                            # Type=7 = Page Break (salto de pagina)
+                            word.Selection.InsertBreak(Type=7)
+                            
+                        # INSERTAR PRIMER CUADRO
+                        # Exportar rango CUADRO_1 a imagen PNG temporal
                         if exportar_rango_a_imagen(ws, RANGO_CUADRO_1, ruta_temp) and os.path.exists(ruta_temp):
-                            # Inserta la imagen en Word.
-                            shape1 = word.Selection.InlineShapes.AddPicture(FileName=ruta_temp, LinkToFile=False, SaveWithDocument=True)
+                            # Insertar imagen como figura incrustada (no vinculada)
+                            shape1 = word.Selection.InlineShapes.AddPicture(
+                                FileName=ruta_temp,  # Ruta de imagen temporal
+                                LinkToFile=False,  # No vincular a archivo (copiar)
+                                SaveWithDocument=True  # Guardar imagen dentro del .doc
+                            )
+                            # Desbloquear aspecto para redimensionamiento libre
                             shape1.LockAspectRatio = False
-                            # Establece dimensiones fijas (18x20 cm en puntos, 28.35 puntos por cm).
-                            shape1.Width = 18 * 28.35
-                            shape1.Height = 20 * 28.35
-                            # Centra la imagen.
+                            # Establecer dimensiones exactas (18 x 20 puntos * factor conversion)
+                            # 28.35 = factor de conversion puntos a pixeles Word
+                            shape1.Width = 18 * 28.35  # Ancho fijo
+                            shape1.Height = 20 * 28.35  # Alto fijo
+                            # Alineacion: 1 = centrado
                             shape1.Range.ParagraphFormat.Alignment = 1
-                            # Colapsa la seleccion al final y agrega un parrafo.
+                            # Mover cursor al final de la imagen
                             word.Selection.Collapse(Direction=0)
+                            # Insertar parrafo nuevo
                             word.Selection.TypeParagraph()
-                            print(f"      {oficio} - Cuadro 1 importado correctamente")
-                            # Elimina el archivo temporal.
+                            # Confirmar en log
+                            consola.log(f"        [OK] Cuadro 1 incrustado a escala estricta 18x20.")
+                            # Eliminar archivo temporal
                             os.remove(ruta_temp)
 
-                        # Espera y inserta un salto de seccion.
+                        # Esperar procesamiento
                         time.sleep(1)
+                        # Insertar salto de pagina antes del segundo cuadro
                         word.Selection.InsertBreak(Type=7)
-
-                        # Exporta e inserta el cuadro 2 de manera similar.
+                        
+                        # INSERTAR SEGUNDO CUADRO
+                        # Exportar rango CUADRO_2 a imagen PNG temporal
                         if exportar_rango_a_imagen(ws, RANGO_CUADRO_2, ruta_temp) and os.path.exists(ruta_temp):
-                            shape2 = word.Selection.InlineShapes.AddPicture(FileName=ruta_temp, LinkToFile=False, SaveWithDocument=True)
+                            # Insertar imagen (mismo procedimiento que cuadro 1)
+                            shape2 = word.Selection.InlineShapes.AddPicture(
+                                FileName=ruta_temp,  # Ruta de imagen temporal
+                                LinkToFile=False,  # No vincular
+                                SaveWithDocument=True  # Guardar dentro del documento
+                            )
+                            # Desbloquear aspecto
                             shape2.LockAspectRatio = False
-                            shape2.Width = 18 * 28.35
-                            shape2.Height = 20 * 28.35
+                            # Dimensiones exactas iguales a cuadro 1
+                            shape2.Width = 18 * 28.35  # Ancho
+                            shape2.Height = 20 * 28.35  # Alto
+                            # Alineacion centrada
                             shape2.Range.ParagraphFormat.Alignment = 1
+                            # Mover cursor
                             word.Selection.Collapse(Direction=0)
+                            # Nuevo parrafo
                             word.Selection.TypeParagraph()
-                            print(f"      {oficio} - Cuadro 2 importado correctamente")
+                            # Confirmar
+                            consola.log(f"        [OK] Cuadro 2 incrustado a escala estricta 18x20.")
+                            # Eliminar temporal
                             os.remove(ruta_temp)
-
-                        # Marca que ya no es el primer paso.
+                        
+                        # Marcar que completamos el primer oficio
                         primer_paso = False
                     except Exception as e:
-                        print(f"      Error en oficio '{oficio}': {e}")
+                        # Error en este oficio: registrar pero continuar con los demas
+                        consola.log(f"        [ERROR] Excepcion capturada en oficio '{oficio}': {e}")
             else:
-                print(f"   No se encontro la etiqueta [[TABLAS_OFICIOS]]")
+                # Etiqueta no encontrada en este documento
+                consola.log(f"      [AVISO] No se encontro la etiqueta raiz [[TABLAS_OFICIOS]]")
 
-            # Guarda y cierra el documento Word.
-            doc.Save(); doc.Close()
+            # Guardar documento con cuadros insertados
+            doc.Save()
+            # Cerrar documento
+            doc.Close()
+            # Confirmar que documento fue maquetado
+            consola.log(f"   [GUARDADO OK] EBSS maquetado.")
 
-        # Cierra el libro de Excel y las aplicaciones.
+        # PASO 8: LIMPIAR RECURSOS
+        # Cerrar Excel sin guardar (no queremos guardar cambios en Excel)
         wb_tablas.Close(False)
+        # Cerrar aplicacion Excel (libera memoria)
         excel_app.Quit()
+        # Cerrar aplicacion Word
         word.Quit()
+        # Actualizar progreso a 100%
+        consola.set_progreso(100, 100, "Cuadros EBSS procesados correctamente.")
 
     except Exception as e:
-        print(f"Error critico en Fase 4: {e}")
-        # Asegura que las aplicaciones se cierren en caso de error.
-        try:
-            excel_app.Quit()
-            word.Quit()
-        except:
-            pass
+        consola.log(f"\n[ERROR CRITICO] Fase 4: {e}")
+        try: excel_app.Quit(); word.Quit()
+        except: pass
 
 # ==========================================
 # FASE 5: EXPORTACION MASIVA A PDF
 # ==========================================
-def fase5_exportar_pdf():
-    pyautogui.alert("Seleccione la carpeta donde se encuentran los documentos Word que desea convertir.\n(Ej: la carpeta '01 Documentos')", "Conversor a PDF")
+def fase5_exportar_pdf(consola):
+    pyautogui.alert("Seleccione la carpeta donde se encuentran los documentos Word que desea convertir.", "Conversor a PDF")
     
     root = tk.Tk(); root.withdraw()
     carpeta_origen = filedialog.askdirectory(title="Selecciona la carpeta de los Documentos Word")
     
     if not carpeta_origen:
-        print("Operacion cancelada. No se selecciono ninguna carpeta.")
+        consola.log("[AVISO] Seleccion de carpeta cancelada por el usuario.")
         return
 
     carpeta_origen = os.path.normpath(carpeta_origen)
     carpeta_padre = os.path.dirname(carpeta_origen)
     carpeta_pdf = os.path.join(carpeta_padre, "03 PDF")
 
+    consola.log(f"==========================================")
+    consola.log(f"FASE 5: CONVERSION MASIVA A FORMATO PDF")
+    consola.log(f"==========================================")
+    consola.log(f"Origen de lectura: {carpeta_origen}")
+
     if not os.path.exists(carpeta_pdf):
         os.makedirs(carpeta_pdf)
-        print(f"Creada nueva carpeta de destino: {carpeta_pdf}")
+        consola.log(f"[INFO] Creada nueva carpeta de entrega en: {carpeta_pdf}")
+    else:
+        consola.log(f"[INFO] Exportando en carpeta existente: {carpeta_pdf}")
 
     archivos_word = [f for f in os.listdir(carpeta_origen) if f.lower().endswith(('.doc', '.docx')) and not f.startswith('~$')]
     
     if not archivos_word:
-        pyautogui.alert("No se encontraron documentos Word en la carpeta seleccionada.", "Sin archivos")
+        consola.log("[ERROR] No se detectaron archivos Microsoft Word validos en el directorio indicado.")
         return
 
-    print("\n" + "="*50)
-    print(f"INICIANDO FASE 5: CONVERSION A PDF")
-    print("="*50)
-    print(f"   Origen:  {carpeta_origen}")
-    print(f"   Destino: {carpeta_pdf}\n")
+    total_archivos = len(archivos_word)
+    consola.log(f"[INFO] Puestos en cola de impresion: {total_archivos} documentos.\n")
 
     try:
         word = win32.gencache.EnsureDispatch('Word.Application')
         word.Visible = False
         word.DisplayAlerts = False
 
-        for archivo in archivos_word:
+        for idx, archivo in enumerate(archivos_word):
             ruta_doc = os.path.join(carpeta_origen, archivo)
             nombre_pdf = os.path.splitext(archivo)[0] + ".pdf"
             ruta_pdf = os.path.join(carpeta_pdf, nombre_pdf)
 
-            print(f"   Convirtiendo: {archivo} ...")
+            consola.set_progreso(idx + 1, total_archivos, f"Convirtiendo a formato vectorial: {archivo}...")
+            consola.log(f"   > Cargando motor de impresion: {archivo}")
             try:
                 doc = word.Documents.Open(ruta_doc)
                 doc.ExportAsFixedFormat(OutputFileName=ruta_pdf, ExportFormat=17, OpenAfterExport=False, OptimizeFor=0, CreateBookmarks=1)
                 doc.Close(False)
-                print(f"      Guardado: {nombre_pdf}")
+                consola.log(f"     [OK] PDF vectorizado y salvado con exito.")
             except Exception as e:
-                print(f"      Error al convertir {archivo}: {e}")
+                consola.log(f"     [ERROR] Fallo en la conversion: {e}")
 
         word.Quit()
-        
-        print("\n" + "="*50)
-        print("CONVERSION COMPLETADA")
-        print("="*50 + "\n")
-        pyautogui.alert(f"Todos los documentos han sido convertidos.\n\nSe han guardado en:\n{carpeta_pdf}", "PDFs Generados")
+        consola.set_progreso(100, 100, "Motor de impresion detenido. Tarea finalizada.")
+        consola.log("\n[FINALIZADO] Paquete de entregables generado.")
 
     except Exception as e:
-        print(f"Error critico en Fase 5: {e}")
+        consola.log(f"\n[ERROR CRITICO] Fase 5: {e}")
         try: word.Quit()
         except: pass
 
 # ==========================================
 # INTERFAZ GRAFICA DEL MENU (TKINTER)
 # ==========================================
+# PROPOSITO: Crear la ventana principal del RPA donde el usuario:
+# 1. Carga la plantilla de proyecto
+# 2. Carga el Excel de configuracion
+# 3. Selecciona cual fase desea ejecutar
+# Esta interfaz es el punto de entrada a todo el sistema RPA
+# ==========================================
 def lanzar_interfaz_principal():
-    # Diccionario con las rutas por defecto para plantilla y Excel de configuracion.
+    # CONFIGURAR RUTAS POR DEFECTO
+    # Diccionario con las rutas iniciales (seran actualizadas si el usuario carga otros archivos)
     rutas_cfg = {
-        "plantilla": r"C:\Users\joleh\Dropbox\INGENIERIA\PLANTILLA",
-        "excel": r"C:\Users\joleh\Desktop\MII\SEGUNDO\2Cuatrimestre\IIA\RPA_Jolehisy_Acevedo_Medina\Configuración_memoria.xlsx"
+        "plantilla": r"C:\Users\joleh\Dropbox\INGENIERIA\PLANTILLA",  # Ruta carpeta plantilla
+        "excel": r"C:\Users\joleh\Desktop\MII\SEGUNDO\2Cuatrimestre\IIA\RPA_Jolehisy_Acevedo_Medina\Configuración_memoria.xlsx"  # Ruta Excel maestro
     }
 
-    # Crea la ventana principal de Tkinter.
-    root = tk.Tk()
-    root.title("RPA Proyectos - Panel de Control")
-    root.geometry("450x550")
-    root.configure(bg="#f4f4f4")
+    # CREAR VENTANA PRINCIPAL
+    root = tk.Tk()  # Crear instancia de ventana Tk
+    root.title("RPA Proyectos - Panel de Control")  # Titulo de ventana
+    root.geometry("450x550")  # Tamaño inicial
+    root.configure(bg="#f4f4f4")  # Color fondo gris claro
     
-    # Calcula la posicion para centrar la ventana en la pantalla.
-    window_width, window_height = 450, 550
-    screen_width, screen_height = root.winfo_screenwidth(), root.winfo_screenheight()
-    position_top, position_right = int(screen_height/2 - window_height/2), int(screen_width/2 - window_width/2)
+    # CENTRAR LA VENTANA EN LA PANTALLA (mismo procedimiento que en VentanaConsola)
+    window_width, window_height = 450, 550  # Dimensiones de la ventana
+    screen_width, screen_height = root.winfo_screenwidth(), root.winfo_screenheight()  # Obtener tamaño pantalla
+    # Calcular posicion para centrar (arriba-abajo)
+    position_top = int(screen_height/2 - window_height/2)
+    # Calcular posicion para centrar (izquierda-derecha)
+    position_right = int(screen_width/2 - window_width/2)
+    # Aplicar geometria centra
     root.geometry(f'{window_width}x{window_height}+{position_right}+{position_top}')
     
-    # Variable para almacenar la eleccion del usuario.
+    # VARIABLES DE CONTROL DE INTERFAZ
+    # StringVar para almacenar la opcion elegida por el usuario
     eleccion_usuario = tk.StringVar()
     
-    # Variables para mostrar el estado de carga de archivos con iconos ASCII.
-    txt_estado_plantilla = tk.StringVar(value="[ " + chr(10004) + " ] Carga la Plantilla" if os.path.exists(rutas_cfg["plantilla"]) else "[ " + chr(10006) + " ] Sin cargar")
-    txt_estado_excel = tk.StringVar(value="[ " + chr(10004) + " ] Carga el Excel" if os.path.exists(rutas_cfg["excel"]) else "[ " + chr(10006) + " ] Sin cargar")
+    # Variable para mostrar estado de la plantilla (con checkmark o X)
+    # chr(10004) = ✓ (checkmark), chr(10006) = ✗ (equis)
+    txt_estado_plantilla = tk.StringVar(
+        value="[ " + chr(10004) + " ] Plantilla Ok" if os.path.exists(rutas_cfg["plantilla"]) else "[ " + chr(10006) + " ] Sin cargar"
+    )
+    # Variable para mostrar estado del Excel (con checkmark o X)
+    txt_estado_excel = tk.StringVar(
+        value="[ " + chr(10004) + " ] Excel Ok" if os.path.exists(rutas_cfg["excel"]) else "[ " + chr(10006) + " ] Sin cargar"
+    )
 
+    # FUNCIONES DE CONTROL DE INTERFAZ
+    # Funcion: Cuando usuario selecciona una opcion, guardarla y cerrar ventana
     def seleccionar(opcion):
-        # Funcion para capturar la opcion seleccionada y cerrar la ventana.
+        # Guardar la opcion elegida en la variable
         eleccion_usuario.set(opcion)
+        # Cerrar ventana principal (destroy = destruir widget)
         root.destroy()
 
+    # Funcion: Cargar carpeta plantilla personalizada
     def cargar_plantilla():
-        # Funcion para cargar una nueva ruta de plantilla via filedialog.
+        # Abrir dialogo para seleccionar carpeta
         carpeta = filedialog.askdirectory(title="Selecciona la carpeta Plantilla")
+        # Si usuario selecciono una carpeta (no cancelo)
         if carpeta:
+            # Guardar ruta normalizada en configuracion
             rutas_cfg["plantilla"] = os.path.normpath(carpeta)
+            # Actualizar etiqueta de estado
             txt_estado_plantilla.set("[ " + chr(10004) + " ] Cargada")
-            lbl_plantilla.config(fg="#009900")  # Cambia el color del label a verde.
+            # Cambiar color a verde (#009900) para indicar exito
+            lbl_plantilla.config(fg="#009900")
 
+    # Funcion: Cargar archivo Excel personalizado
     def cargar_excel():
-        # Funcion para cargar un nuevo archivo Excel de configuracion.
-        archivo = filedialog.askopenfilename(title="Selecciona Excel de Configuracion", filetypes=[("Archivos Excel", "*.xlsx *.xls")])
+        # Abrir dialogo para seleccionar archivo Excel
+        # filetypes filtra para mostrar solo archivos .xlsx y .xls
+        archivo = filedialog.askopenfilename(
+            title="Selecciona Excel de Configuracion", 
+            filetypes=[("Archivos Excel", "*.xlsx *.xls")]
+        )
+        # Si usuario selecciono un archivo (no cancelo)
         if archivo:
+            # Guardar ruta normalizada en configuracion
             rutas_cfg["excel"] = os.path.normpath(archivo)
+            # Actualizar etiqueta de estado
             txt_estado_excel.set("[ " + chr(10004) + " ] Cargado")
-            lbl_excel.config(fg="#009900")  # Cambia el color del label a verde.
+            # Cambiar color a verde para indicar exito
+            lbl_excel.config(fg="#009900")
 
-    # Etiqueta de cabecera de la interfaz.
-    tk.Label(root, text="Asistente RPA de Proyectos", font=("Segoe UI", 16, "bold"), bg="#f4f4f4", fg="#333333").pack(pady=(15, 5))
+    # ELEMENTO 1: TITULO PRINCIPAL
+    tk.Label(
+        root, 
+        text="Asistente RPA de Proyectos",  # Texto del titulo
+        font=("Segoe UI", 16, "bold"),  # Fuente, tamaño, estilo
+        bg="#f4f4f4",  # Color fondo
+        fg="#333333"  # Color texto gris oscuro
+    ).pack(pady=(15, 5))  # Empaquetar con margen arriba 15, abajo 5
 
-    # Frame para la seccion de configuracion previa.
-    frame_config = tk.LabelFrame(root, text=" Configuracion Previa ", font=("Segoe UI", 10, "bold"), bg="#f4f4f4", fg="#333333", padx=10, pady=10)
-    frame_config.pack(fill="x", padx=30, pady=10)
+    # ELEMENTO 2: MARCO DE CONFIGURACION (PLANTILLA Y EXCEL)
+    frame_config = tk.LabelFrame(
+        root, 
+        text=" Configuracion Previa ",  # Titulo del marco
+        font=("Segoe UI", 10, "bold"),  # Fuente titulo
+        bg="#f4f4f4",  # Color fondo
+        fg="#333333",  # Color titulo
+        padx=10,  # Margen interno izq-der
+        pady=10  # Margen interno arriba-abajo
+    )
+    frame_config.pack(fill="x", padx=30, pady=10)  # Llenar horizontalmente, margen externo
 
-    # Fila para la plantilla: boton y label de estado.
-    frame_p = tk.Frame(frame_config, bg="#f4f4f4")
-    frame_p.pack(fill="x", pady=2)
-    tk.Button(frame_p, text="Cargar Plantilla", width=18, command=cargar_plantilla, font=("Segoe UI", 9)).pack(side="left")
-    lbl_plantilla = tk.Label(frame_p, textvariable=txt_estado_plantilla, font=("Consolas", 10, "bold"), bg="#f4f4f4", fg="#009900" if "Ok" in txt_estado_plantilla.get() else "#CC0000")
-    lbl_plantilla.pack(side="left", padx=10)
+    # BOTON Y ETIQUETA PARA PLANTILLA
+    frame_p = tk.Frame(frame_config, bg="#f4f4f4")  # Marco para organizar boton y etiqueta
+    frame_p.pack(fill="x", pady=2)  # Empaquetar horizontalmente
+    # Boton para cargar plantilla
+    tk.Button(
+        frame_p, 
+        text="Cargar Plantilla",  # Texto del boton
+        width=18,  # Ancho
+        command=cargar_plantilla,  # Funcion a ejecutar al clickear
+        font=("Segoe UI", 9)  # Fuente
+    ).pack(side="left")  # Colocar a la izquierda
+    # Etiqueta de estado (checkmark o X)
+    lbl_plantilla = tk.Label(
+        frame_p, 
+        textvariable=txt_estado_plantilla,  # Variable que muestra el estado
+        font=("Consolas", 10, "bold"),  # Fuente monoespaciada
+        bg="#f4f4f4",  # Color fondo
+        # Color texto: verde si existe, rojo si no
+        fg="#009900" if "Ok" in txt_estado_plantilla.get() else "#CC0000"
+    )
+    lbl_plantilla.pack(side="left", padx=10)  # Colocar a la derecha, con margen
 
-    # Fila para el Excel: boton y label de estado.
-    frame_e = tk.Frame(frame_config, bg="#f4f4f4")
-    frame_e.pack(fill="x", pady=2)
-    tk.Button(frame_e, text="Cargar Excel", width=18, command=cargar_excel, font=("Segoe UI", 9)).pack(side="left")
-    lbl_excel = tk.Label(frame_e, textvariable=txt_estado_excel, font=("Consolas", 10, "bold"), bg="#f4f4f4", fg="#009900" if "Ok" in txt_estado_excel.get() else "#CC0000")
-    lbl_excel.pack(side="left", padx=10)
+    # BOTON Y ETIQUETA PARA EXCEL
+    frame_e = tk.Frame(frame_config, bg="#f4f4f4")  # Marco para organizar
+    frame_e.pack(fill="x", pady=2)  # Empaquetar horizontalmente
+    # Boton para cargar Excel
+    tk.Button(
+        frame_e, 
+        text="Cargar Excel",  # Texto del boton
+        width=18,  # Ancho
+        command=cargar_excel,  # Funcion a ejecutar al clickear
+        font=("Segoe UI", 9)  # Fuente
+    ).pack(side="left")  # Colocar a la izquierda
+    # Etiqueta de estado
+    lbl_excel = tk.Label(
+        frame_e, 
+        textvariable=txt_estado_excel,  # Variable que muestra el estado
+        font=("Consolas", 10, "bold"),  # Fuente
+        bg="#f4f4f4",  # Color fondo
+        # Color texto: verde si existe, rojo si no
+        fg="#009900" if "Ok" in txt_estado_excel.get() else "#CC0000"
+    )
+    lbl_excel.pack(side="left", padx=10)  # Colocar a la derecha
 
-    # Etiqueta instructiva para seleccionar modulo.
-    tk.Label(root, text="Selecciona el modulo que deseas ejecutar:", font=("Segoe UI", 10), bg="#f4f4f4", fg="#666666").pack(pady=(5, 10))
+    # ELEMENTO 3: ETIQUETA INSTRUCCION
+    tk.Label(
+        root, 
+        text="Selecciona el modulo que deseas ejecutar:",  # Texto de instruccion
+        font=("Segoe UI", 10),  # Fuente
+        bg="#f4f4f4",  # Color fondo
+        fg="#666666"  # Color texto gris
+    ).pack(pady=(5, 10))  # Margen superior 5, inferior 10
 
-    # Lista de botones con texto, color de fondo y texto.
+    # ELEMENTO 4: BOTONES DE OPCIONES
+    # Lista de tuplas (texto_boton, color_fondo, color_texto)
     botones = [
-        ("1. Crear Estructura de Proyecto", "#4CAF50", "white"),
-        ("2. Actualizar Textos (Word)", "#2196F3", "white"),
-        ("3. Insertar Imagenes (Memoria)", "#2196F3", "white"),
-        ("4. Generar Cuadros EBSS", "#2196F3", "white"),
-        ("5. Convertir Documentos a PDF", "#FF9800", "white"),
-        ("6. Ejecucion Completa (Fases 2, 3 y 4)", "#9C27B0", "white")
+        ("1. Crear Estructura de Proyecto", "#4CAF50", "white"),  # Verde para crear proyecto
+        ("2. Actualizar Textos (Word)", "#2196F3", "white"),  # Azul para editar textos
+        ("3. Insertar Imagenes (Memoria)", "#2196F3", "white"),  # Azul para imagenes
+        ("4. Generar Cuadros EBSS", "#2196F3", "white"),  # Azul para EBSS
+        ("5. Convertir Documentos a PDF", "#FF9800", "white"),  # Naranja para PDF
+        ("6. Ejecucion Completa (Fases 2, 3 y 4)", "#9C27B0", "white")  # Morado para multifase
     ]
 
-    # Crea y empaqueta cada boton.
+    # Crear cada boton con su configuracion
     for texto, bg, fg in botones:
-        tk.Button(root, text=texto, bg=bg, fg=fg, font=("Segoe UI", 11, "bold"), 
-                  activebackground="#e0e0e0", relief="flat", cursor="hand2",
-                  command=lambda t=texto: seleccionar(t), width=35, pady=4).pack(pady=3)
+        tk.Button(
+            root, 
+            text=texto,  # Etiqueta del boton
+            bg=bg,  # Color fondo
+            fg=fg,  # Color texto
+            font=("Segoe UI", 11, "bold"),  # Fuente grande y negrita
+            activebackground="#e0e0e0",  # Color al presionar
+            relief="flat",  # Sin bordes 3D (plano)
+            cursor="hand2",  # Cursor mano al pasar
+            # Cuando se presiona, pasar el texto a seleccionar()
+            command=lambda t=texto: seleccionar(t), 
+            width=35,  # Ancho del boton
+            pady=4  # Margen vertical interno
+        ).pack(pady=3)  # Empaquetar con margen entre botones
         
-    # Inicia el bucle principal de Tkinter y retorna la eleccion y rutas.
+    # INICIAR VENTANA (BLOQUEA HASTA QUE SE CIERRE)
     root.mainloop()
+    
+    # RETORNAR VALORES AL CIERRE
+    # Retornar: opcion elegida, ruta plantilla, ruta excel
     return eleccion_usuario.get(), rutas_cfg["plantilla"], rutas_cfg["excel"]
 
 # ==========================================
-# MOTOR PRINCIPAL
+# MOTOR PRINCIPAL / PUNTO DE ENTRADA
 # ==========================================
-if __name__ == "__main__":
-    # Limpia la pantalla de la consola al iniciar.
-    os.system('cls' if os.name == 'nt' else 'clear')
+# PROPOSITO: Seccion que se ejecuta cuando se corre el script directamente
+# Coordina todo el flujo del RPA desde la interfaz hasta la ejecucion
+# ==========================================
 
-    # Lanza la interfaz grafica para que el usuario seleccione la opcion y configure rutas.
+if __name__ == "__main__":  # Solo ejecutar si es el archivo principal
+    # PASO 1: LANZAR INTERFAZ MENU Y OBTENER ELECCION
+    # Retorna: opcion elegida, ruta plantilla, ruta excel
     opcion_elegida, ruta_plantilla, excel_maestro = lanzar_interfaz_principal()
 
-    # Ejecuta la fase 1 si se selecciono crear estructura de proyecto.
-    if opcion_elegida == '1. Crear Estructura de Proyecto':
-        fase1_crear_entorno(ruta_plantilla)
-        
-    # Ejecuta la fase 5 si se selecciono conversion a PDF.
-    elif opcion_elegida == '5. Convertir Documentos a PDF':
-        fase5_exportar_pdf()
-        
-    # Para las opciones que requieren una carpeta de proyecto (fases 2,3,4,6).
-    elif opcion_elegida in ['2. Actualizar Textos (Word)', '3. Insertar Imagenes (Memoria)', '4. Generar Cuadros EBSS', '6. Ejecucion Completa (Fases 2, 3 y 4)']:
-        # Crea una ventana Tkinter oculta para usar filedialog.
-        root = tk.Tk(); root.withdraw()
-        # Solicita al usuario seleccionar la carpeta del proyecto a procesar.
-        carpeta = filedialog.askdirectory(title="Selecciona la carpeta (Raiz o Subcarpeta) a procesar")
-        if carpeta:
-            # Normaliza la ruta de la carpeta seleccionada.
-            carpeta = os.path.normpath(carpeta)
-            # Extrae el codigo y nombre de empresa del nombre de la carpeta (formato: CODIGO EMPRESA).
-            nombre_carpeta = os.path.basename(carpeta)
-            partes = nombre_carpeta.split(' ', 1)
-            if len(partes) == 2:
-                codigo = partes[0]
-                empresa = partes[1]
-            else:
-                # Si el formato no es correcto, muestra error y sale.
-                pyautogui.alert("El nombre de la carpeta no tiene el formato esperado (CODIGO EMPRESA).", "Error")
-                exit()
+    # PASO 2: VALIDAR QUE NO CANCELO (selecciono algo)
+    if opcion_elegida:
+        # CREAR CONSOLA PARA MOSTRAR PROGRESO
+        # titulo = muestra que modulo se esta ejecutando
+        consola_activa = VentanaConsola(titulo=f"Ejecutando: {opcion_elegida}")
+
+        # ========== OPCION 1: CREAR ESTRUCTURA ==========
+        if opcion_elegida == '1. Crear Estructura de Proyecto':
+            # Ejecutar fase 1 (clonado de plantilla y renombrado)
+            fase1_crear_entorno(ruta_plantilla, consola_activa)
+            # Notificar al usuario que termino
+            pyautogui.alert("Modulo finalizado.", "RPA Completado")
+            
+        # ========== OPCION 5: CONVERSION PDF ==========
+        elif opcion_elegida == '5. Convertir Documentos a PDF':
+            # Ejecutar fase 5 (conversion de Word a PDF)
+            fase5_exportar_pdf(consola_activa)
+            # Notificar al usuario
+            pyautogui.alert("Modulo finalizado.", "RPA Completado")
+            
+        # ========== OPCIONES 2, 3, 4, 6: REQUIEREN CARPETA ==========
+        # Estas opciones trabajan sobre un proyecto existente
+        elif opcion_elegida in ['2. Actualizar Textos (Word)', '3. Insertar Imagenes (Memoria)', '4. Generar Cuadros EBSS', '6. Ejecucion Completa (Fases 2, 3 y 4)']:
+            # CREAR SELECTOR DE CARPETA
+            root = tk.Tk()  # Ventana temporal
+            root.withdraw()  # Ocultar ventana (solo mostrar dialogo)
+            # DIALOGO: Seleccionar carpeta del proyecto
+            carpeta = filedialog.askdirectory(title="Selecciona la carpeta a procesar")
+            
+            # VALIDAR: Usuario selecciono una carpeta
+            if carpeta:
+                # NORMALIZAR RUTA (convertir / a \\)
+                carpeta = os.path.normpath(carpeta)
                 
-            # Ejecuta la fase correspondiente segun la opcion elegida.
-            if opcion_elegida == '2. Actualizar Textos (Word)':
-                fase2_reemplazar_textos(carpeta, excel_maestro, codigo, empresa)
-            elif opcion_elegida == '3. Insertar Imagenes (Memoria)':
-                fase3_insertar_imagenes(carpeta, excel_maestro, codigo, empresa)
-            elif opcion_elegida == '4. Generar Cuadros EBSS':
-                fase4_insertar_ebss(carpeta, excel_maestro, codigo, empresa)
-            elif opcion_elegida == '6. Ejecucion Completa (Fases 2, 3 y 4)':
-                # Ejecuta las fases 2, 3 y 4 en secuencia.
-                fase2_reemplazar_textos(carpeta, excel_maestro, codigo, empresa)
-                fase3_insertar_imagenes(carpeta, excel_maestro, codigo, empresa)
-                fase4_insertar_ebss(carpeta, excel_maestro, codigo, empresa)
+                # ===== SISTEMA RADAR: DETECTAR CODIGO Y EMPRESA AUTOMATICAMENTE =====
+                # Este sistema intenta descubrir el codigo y empresa subiendo por carpetas
+                # Util si el usuario selecciono una subcarpeta en lugar de la carpeta raiz
+                
+                # Inicializar variables de deteccion
+                ruta_analisis = carpeta  # Punto de partida para busqueda
+                cod_sug = ""  # Codigo sugerido (vacio al inicio)
+                emp_sug = ""  # Empresa sugerida (vacia al inicio)
+                
+                # BUCLE: Subir en la jerarquia de carpetas hasta encontrar patron
+                # Busca una carpeta con nombre "CODIGO EMPRESA"
+                # CODIGO debe ser numerico para identificarse como codigo
+                while ruta_analisis != os.path.dirname(ruta_analisis):  # Hasta llegar a raiz
+                    # Obtener nombre de la carpeta actual
+                    nombre_c = os.path.basename(ruta_analisis)
+                    # Dividir nombre por espacio (espera formato "CODIGO EMPRESA")
+                    partes = nombre_c.split(' ', 1)  # Maximo 2 partes
+                    # VERIFICAR: Tiene 2 partes Y la primera es numerica
+                    if len(partes) > 1 and partes[0].isdigit():
+                        # ENCONTRADO! Guardar codigo y empresa detectados
+                        cod_sug = partes[0]  # Primer componente = codigo
+                        emp_sug = partes[1]  # Segundo componente = empresa
+                        break  # Salir del bucle (encontramos)
+                    # NO ENCONTRADO: Subir un nivel en la jerarquia
+                    ruta_analisis = os.path.dirname(ruta_analisis)  # Ir a carpeta padre
+
+                # ===== SOLICITAR AL USUARIO CONFIRMACION DE CODIGO =====
+                # Mostrar dialogo con valor sugerido (si se encontro) o vacio
+                codigo = pyautogui.prompt(
+                    "Confirma el CODIGO del proyecto:",  # Pregunta
+                    "Datos de Ejecucion",  # Titulo
+                    default=cod_sug  # Valor por defecto (sugerencia)
+                )
+                # VALIDAR: Usuario ingreso codigo (no cancelo)
+                if not codigo: 
+                    # Usuario cancelo o dejo vacio
+                    consola_activa.log("[AVISO] Operacion cancelada. Falta el codigo.")
+                else:
+                    # ===== SOLICITAR AL USUARIO CONFIRMACION DE EMPRESA =====
+                    empresa = pyautogui.prompt(
+                        "Confirma el nombre de la EMPRESA:",  # Pregunta
+                        "Datos de Ejecucion",  # Titulo
+                        default=emp_sug  # Valor por defecto (sugerencia)
+                    )
+                    # VALIDAR: Usuario ingreso empresa (no cancelo)
+                    if not empresa:
+                        # Usuario cancelo o dejo vacio
+                        consola_activa.log("[AVISO] Operacion cancelada. Falta la empresa.")
+                    else:
+                        # ===== EJECUTAR LA FASE SELECCIONADA =====
+                        # Ya tenemos: carpeta, codigo, empresa, excel_maestro, consola_activa
+                        
+                        # OPCION 2: Solo reemplazar textos
+                        if opcion_elegida == '2. Actualizar Textos (Word)':
+                            fase2_reemplazar_textos(carpeta, excel_maestro, codigo, empresa, consola_activa)
+                        # OPCION 3: Solo insertar imagenes
+                        elif opcion_elegida == '3. Insertar Imagenes (Memoria)':
+                            fase3_insertar_imagenes(carpeta, excel_maestro, codigo, empresa, consola_activa)
+                        # OPCION 4: Solo generar EBSS
+                        elif opcion_elegida == '4. Generar Cuadros EBSS':
+                            fase4_insertar_ebss(carpeta, excel_maestro, codigo, empresa, consola_activa)
+                        # OPCION 6: Ejecutar todas las fases (2, 3 y 4)
+                        elif opcion_elegida == '6. Ejecucion Completa (Fases 2, 3 y 4)':
+                            # EJECUTAR EN SECUENCIA
+                            # Primero textos, luego imagenes, luego EBSS
+                            fase2_reemplazar_textos(carpeta, excel_maestro, codigo, empresa, consola_activa)
+                            fase3_insertar_imagenes(carpeta, excel_maestro, codigo, empresa, consola_activa)
+                            fase4_insertar_ebss(carpeta, excel_maestro, codigo, empresa, consola_activa)
+                        
+                        # MENSAJE FINAL DE EXITO
+                        consola_activa.log("\n==========================================")  # Separador
+                        consola_activa.log("PROCESO TOTALMENTE COMPLETADO")  # Mensaje principal
+                        consola_activa.log("==========================================")  # Separador
+                        # Alerta de exito
+                        pyautogui.alert("Modulo finalizado con exito.", "RPA Completado")
+            else:
+                # Usuario cancelo selector de carpeta
+                consola_activa.log("[AVISO] Operacion cancelada. No se selecciono ninguna carpeta.")
+
+        # ===== MANTENER CONSOLA ABIERTA =====
+        # Actualizar mensaje de estado final
+        consola_activa.lbl_estado.config(text="Proceso terminado. Puedes cerrar esta ventana con seguridad.")
+        # Mostrar ventana de consola bloqueante (espera hasta que usuario la cierre)
+        consola_activa.root.mainloop()
